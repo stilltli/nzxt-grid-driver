@@ -1,0 +1,17 @@
+
+.vs/
+
+GridDriver/bin/
+GridDriver/obj/
+
+OHM/bin/
+OHM/obj/
+
+*.sdf
+*.suo
+*.opensdf
+*.opendb
+*.db
+*.ipch
+*.pdb
+*.log
