@@ -5,28 +5,28 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 {
 	public class NzxtGridGroup : IGroup
 	{
-		private List<NzxtGridDevice> _drivers = new List<NzxtGridDevice>();
+		private List<NzxtGridDevice> _devices = new List<NzxtGridDevice>();
 
-		public NzxtGridGroup(ISettings settings)
+		public NzxtGridGroup(ISettings settings, ILog log)
 		{
 			var devices = NzxtGridDevice.EnumerateDevices();
 			foreach (var device in devices)
 			{
-				_drivers.Add(new NzxtGridDevice(device.DeviceID, settings));
+				_devices.Add(new NzxtGridDevice(device.DeviceID, settings, log));
 			}
 		}
 
-		public IHardware[] Hardware { get { return _drivers.ToArray(); } }
+		public IHardware[] Hardware { get { return _devices.ToArray(); } }
 
 		public string GetReport() { return ""; }
 
 		public void Close()
 		{
-			foreach (var driver in _drivers)
+			foreach (var device in _devices)
 			{
-				driver.Close();
+				device.Close();
 			}
-			_drivers.Clear();
+			_devices.Clear();
 		}
 	}
 }

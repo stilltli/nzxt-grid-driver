@@ -11,10 +11,11 @@ namespace grid
 {
 	public partial class GridForm : Form
 	{
+		public const string LogName = "Grid.log";
 		private const float DeltaX = 2;
 		private const float DeltaY = 1;
 
-		private StreamWriter _log;
+		private LogWriter _log;
 		private Computer _computer;
 		private List<ISensor> _sensors = new List<ISensor>();
 		private List<IHardware> _hardware = new List<IHardware>();
@@ -25,27 +26,28 @@ namespace grid
 		public GridForm()
 		{
 			InitializeComponent();
-
 			notifyIcon.Visible = true;
 			notifyIcon.Text = this.Text;
 
-			bool minimized = true;
+			bool isVisible = false;
 			string[] args = Environment.GetCommandLineArgs();
 			foreach (var arg in args)
 			{
 				if (arg == "startvisible")
 				{
-					minimized = false;
+					isVisible = true;
 					break;
 				}
 			}
 
-			WindowState = minimized ? FormWindowState.Minimized : FormWindowState.Normal;
-			ShowInTaskbar = !minimized;
+			ShowInTaskbar = isVisible;
+			FormBorderStyle = isVisible ? FormBorderStyle.Sizable : FormBorderStyle.SizableToolWindow;
+			WindowState = isVisible ? FormWindowState.Normal : FormWindowState.Minimized;
 		}
 
 		private void GridForm_Shown(object sender, EventArgs e)
 		{
+			if (WindowState == FormWindowState.Minimized) { Hide(); }
 			InitApp();
 		}
 
@@ -97,26 +99,26 @@ namespace grid
 		{
 			try
 			{
-				_log = new StreamWriter(new FileStream("app.log", FileMode.Create, FileAccess.Write, FileShare.Read));
-				Log("InitApp");
+				_log = new LogWriter();
+				_log.Open(LogName);
+				_log.WriteLine("InitApp");
 
 				LoadAppConfig();
-
-				_computer = new Computer();
+				_computer = new Computer(null, _log);
 				InitSensors();
 
 				updateTimer.Start();
 			}
 			catch (Exception ex)
 			{
-				DumpEx(ex);
+				_log.WriteException(ex);
 				MessageBox.Show(ex.Message);
 			}
 		}
 
 		private void ShutdownApp()
 		{
-			Log("ShutdownApp");
+			_log.WriteLine("ShutdownApp");
 
 			try
 			{
@@ -129,7 +131,7 @@ namespace grid
 			}
 			catch (Exception ex)
 			{
-				DumpEx(ex);
+				_log.WriteException(ex);
 			}
 
 			if (_computer != null)
@@ -162,7 +164,7 @@ namespace grid
 			}
 			catch (Exception ex)
 			{
-				DumpEx(ex);
+				_log.WriteException(ex);
 			}
 		}
 
@@ -181,10 +183,8 @@ namespace grid
 					InitController(curve);
 				}
 			}
-			catch (Exception ex)
-			{
-				DumpEx(ex);
-			}
+			catch (FileNotFoundException) { /* IGNORE */ }
+			catch (Exception ex) { _log.WriteException(ex); }
 		}
 
 		#endregion
@@ -212,8 +212,8 @@ namespace grid
 			}
 			catch (Exception ex)
 			{
-				DumpEx(ex);
 				updateTimer.Stop();
+				_log.WriteException(ex);
 				MessageBox.Show(ex.Message);
 			}
 		}
@@ -234,7 +234,7 @@ namespace grid
 			{
 				if (item != null)
 				{
-					Log("Invalid config: Control={0} Sensor={1}", controller.ControlUid, controller.SensorUid);
+					_log.WriteLine("Invalid config: Control={0} Sensor={1}", controller.ControlUid, controller.SensorUid);
 					item.BackColor = cNotFoundColor;
 				}
 				return;
@@ -276,7 +276,7 @@ namespace grid
 			float y = 0;
 			if (!Interpolate(x, controller.Curve, out y))
 			{
-				Log("Interpolate failed: X={0}", x);
+				_log.WriteLine("Interpolate failed: X={0}", x);
 				sensorControl.Control.SetDefault();
 				item.BackColor = cErrorColor;
 				return;
@@ -284,7 +284,7 @@ namespace grid
 
 			if (y < sensorControl.Control.MinSoftwareValue || y > sensorControl.Control.MaxSoftwareValue)
 			{
-				Log("Interpolate failed: X={0} Y={0}", x, y);
+				_log.WriteLine("Interpolate failed: X={0} Y={0}", x, y);
 				sensorControl.Control.SetDefault();
 				item.BackColor = cErrorColor;
 				return;
@@ -307,8 +307,7 @@ namespace grid
 				return;
 			}
 
-			//var title = GetForegroundWindowText();
-			Log("{0} # x={1} y={2} dx={3} dy={4} dt={5} hdt={6}",
+			_log.WriteLine("SetSpeed {0} x={1} y={2} dx={3} dy={4} dt={5} hdt={6}",
 				controller.ControlUid, Str(x), Str(y), Str(dx), Str(dy), Str(dt), Str(hdt));
 
 			sensorControl.Control.SetSoftware(y);
@@ -549,39 +548,6 @@ namespace grid
 
 		#region UTILS
 
-		private void Log(string msg)
-		{
-			var line = GetTimestamp() + " # " + msg;
-
-			System.Diagnostics.Debug.WriteLine(line);
-
-			if (_log != null)
-			{
-				_log.WriteLine(line);
-			}
-		}
-
-		private void Log(string format, params object[] args)
-		{
-			Log(String.Format(format, args));
-		}
-
-		private void DumpEx(Exception ex)
-		{
-			Log(ex.ToString());
-
-			using (var writer = new StreamWriter(new FileStream("ex.log", FileMode.Append, FileAccess.Write, FileShare.Read)))
-			{
-				writer.WriteLine(GetTimestamp());
-				writer.WriteLine(ex.ToString());
-			}
-		}
-
-		private string GetTimestamp()
-		{
-			return DateTime.Now.ToString("yyyyMMdd:HHmmss:ffff");
-		}
-
 		private string Serialize<T>(T obj)
 		{
 			var stream = new System.IO.MemoryStream();
@@ -665,26 +631,48 @@ namespace grid
 			combo.SelectedItem = item;
 		}
 
-		[DllImport("user32.dll")]
-		static extern IntPtr GetForegroundWindow();
-
-		[DllImport("user32.dll")]
-		static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
-
-		private string GetForegroundWindowText()
-		{
-			const int BufSize = 256;
-			var buf = new System.Text.StringBuilder(BufSize);
-			if (GetWindowText(GetForegroundWindow(), buf, BufSize) > 0)
-			{
-				return buf.ToString();
-			}
-			return null;
-		}
-
 		#endregion
 
 		#region CLASSES
+
+		internal class LogWriter : IDisposable, ILog
+		{
+			private StreamWriter _writer;
+
+			public LogWriter() { }
+			~LogWriter() { Dispose(false); }
+			public void Dispose() { Dispose(true); GC.SuppressFinalize(this); }
+			protected virtual void Dispose(bool disposing) { if (disposing) { Close(); } }
+
+			public void Open(string filename) { _writer = new StreamWriter(new FileStream(filename, FileMode.Create, FileAccess.Write, FileShare.Read)); }
+			public void Close() { if (_writer != null) { _writer.Dispose(); _writer = null; } }
+
+			public void WriteLine(string msg)
+			{
+				var line = GetTimestamp() + " # " + msg;
+				System.Diagnostics.Debug.WriteLine(line);
+				_writer.WriteLine(line);
+			}
+
+			public void WriteLine(string format, params object[] args)
+			{
+				WriteLine(String.Format(format, args));
+			}
+
+			public void WriteException(Exception ex)
+			{
+				WriteLine(ex.ToString());
+
+				using (var exlog = new StreamWriter(new FileStream("ex.log", FileMode.Append, FileAccess.Write, FileShare.Read)))
+				{
+					exlog.WriteLine(GetTimestamp());
+					exlog.WriteLine(ex.ToString());
+					exlog.WriteLine();
+				}
+			}
+
+			private string GetTimestamp() { return DateTime.Now.ToString("yyyyMMdd_HHmmss_ffff"); }
+		}
 
 		[DataContract]
 		public class Point

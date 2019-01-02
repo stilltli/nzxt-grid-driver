@@ -6,14 +6,18 @@ namespace grid
 {
 	public class Computer : IDisposable, IComputer
 	{
-		private ISettings settings = new Settings();
-		private List<IGroup> groups = new List<IGroup>();
+		private ISettings _settings;
+		private ILog _log;
+		private List<IGroup> _groups = new List<IGroup>();
 
-		public Computer()
+		public Computer(ISettings settings, ILog log)
 		{
-			Add(new OpenHardwareMonitor.Hardware.ATI.ATIGroup(settings));
-			Add(new OpenHardwareMonitor.Hardware.Nvidia.NvidiaGroup(settings));
-			Add(new OpenHardwareMonitor.Hardware.Nzxt.NzxtGridGroup(settings));
+			_settings = (settings != null ? settings : new Settings());
+			_log = (log != null ? log : new Log());
+
+			Add(new OpenHardwareMonitor.Hardware.ATI.ATIGroup(_settings));
+			Add(new OpenHardwareMonitor.Hardware.Nvidia.NvidiaGroup(_settings));
+			Add(new OpenHardwareMonitor.Hardware.Nzxt.NzxtGridGroup(_settings, _log));
 		}
 
 		~Computer()
@@ -31,9 +35,9 @@ namespace grid
 		{
 			if (disposing)
 			{
-				while (groups.Count > 0)
+				while (_groups.Count > 0)
 				{
-					IGroup group = groups[groups.Count - 1];
+					IGroup group = _groups[_groups.Count - 1];
 					Remove(group);
 				}
 			}
@@ -41,9 +45,9 @@ namespace grid
 
 		private void Add(IGroup group)
 		{
-			if (groups.Contains(group)) return;
+			if (_groups.Contains(group)) return;
 
-			groups.Add(group);
+			_groups.Add(group);
 
 			if (HardwareAdded != null)
 			{
@@ -54,9 +58,9 @@ namespace grid
 
 		private void Remove(IGroup group)
 		{
-			if (!groups.Contains(group)) return;
+			if (!_groups.Contains(group)) return;
 
-			groups.Remove(group);
+			_groups.Remove(group);
 
 			if (HardwareRemoved != null)
 			{
@@ -69,7 +73,7 @@ namespace grid
 
 		public void Update()
 		{
-			foreach (IGroup group in groups)
+			foreach (IGroup group in _groups)
 			{
 				foreach (IHardware hardware in group.Hardware)
 					hardware.Update();
@@ -85,7 +89,7 @@ namespace grid
 			get
 			{
 				List<IHardware> list = new List<IHardware>();
-				foreach (IGroup group in groups)
+				foreach (IGroup group in _groups)
 				{
 					foreach (IHardware hardware in group.Hardware)
 						list.Add(hardware);
@@ -119,17 +123,24 @@ namespace grid
 
 		public void Traverse(IVisitor visitor)
 		{
-			foreach (IGroup group in groups)
+			foreach (IGroup group in _groups)
 				foreach (IHardware hardware in group.Hardware)
 					hardware.Accept(visitor);
 		}
 	}
 
-	public class Settings : ISettings
+	internal class Settings : ISettings
 	{
 		public bool Contains(string name) { return false; }
 		public void SetValue(string name, string value) { }
 		public string GetValue(string name, string value) { return value; }
 		public void Remove(string name) { }
+	}
+
+	internal class Log : ILog
+	{
+		public void WriteLine(string msg) { System.Diagnostics.Debug.WriteLine(msg); }
+		public void WriteLine(string format, params object[] args) { System.Diagnostics.Debug.WriteLine(format, args); }
+		public void WriteException(Exception ex) { System.Diagnostics.Debug.WriteLine(ex.ToString()); }
 	}
 }

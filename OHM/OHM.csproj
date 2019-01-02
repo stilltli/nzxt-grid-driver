@@ -75,6 +75,7 @@
     <Compile Include="Interfaces\IElement.cs" />
     <Compile Include="Interfaces\IGroup.cs" />
     <Compile Include="Interfaces\IHardware.cs" />
+    <Compile Include="Interfaces\ILog.cs" />
     <Compile Include="Interfaces\IParameter.cs" />
     <Compile Include="Interfaces\ISensor.cs" />
     <Compile Include="Interfaces\ISettings.cs" />

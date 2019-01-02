@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO.Ports;
 using System.Management;
 using System.Threading;
@@ -22,6 +21,8 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 			public NzxtGridChannel grid = null;
 		}
 
+		private ILog _log;
+
 		private int _numChannels = 6;
 		private List<Chan> _channels = new List<Chan>();
 
@@ -39,11 +40,10 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 		private volatile bool _runFlag = false;
 		private object _stateMx = new object();
 
-		public NzxtGridDevice(string portName, ISettings settings) :
+		public NzxtGridDevice(string portName, ISettings settings, ILog log) :
 			base("Nzxt Grid " + portName, new Identifier("grid", portName.ToLower()), settings)
 		{
-			Debug.WriteLine("+NzxtGridDevice " + this.Identifier.ToString());
-
+			_log = log;
 			_portName = portName;
 
 			for (int i = 0; i < _numChannels; ++i)
@@ -113,11 +113,11 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 
 		private void Start()
 		{
-			Debug.WriteLine("Start " + this.Identifier.ToString());
+			_log.WriteLine("Start " + this.Identifier.ToString());
 
 			lock (_stateMx)
 			{
-				if (_worker != null) throw new InvalidOperationException("Already started");
+				if (_worker != null) throw new InvalidOperationException("Worker already started");
 
 				_runFlag = true;
 				_worker = new Thread(new ThreadStart(ThreadProc));
@@ -127,24 +127,25 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 
 		private void Stop()
 		{
-			Debug.WriteLine("Stop " + this.Identifier.ToString());
+			_log.WriteLine("Stop " + this.Identifier.ToString());
 
 			lock (_stateMx)
 			{
 				_runFlag = false;
-
 				if (_worker != null)
 				{
 					try { if (!_worker.Join(_stopTimeout)) { _worker.Abort(); } }
 					catch { }
 					_worker = null;
 				}
+
+				ClosePort();
 			}
 		}
 
 		private void ThreadProc()
 		{
-			Debug.WriteLine("Enter ThreadProc " + this.Identifier.ToString());
+			_log.WriteLine("Enter ThreadProc " + this.Identifier.ToString());
 
 			try
 			{
@@ -152,7 +153,6 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 
 				_cmd[0] = 0xC0;
 				WriteCmd(1, 1);
-				Debug.WriteLine("INIT: " + _data[0]);
 
 				while (_runFlag)
 				{
@@ -161,12 +161,10 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 			}
 			catch (Exception ex)
 			{
-				Debug.WriteLine("EXCEPTION: " + this.Identifier.ToString() + " -> " + ex.ToString());
+				_log.WriteException(ex);
 			}
 
-			ClosePort();
-
-			Debug.WriteLine("Exit ThreadProc " + this.Identifier.ToString());
+			_log.WriteLine("Exit ThreadProc " + this.Identifier.ToString());
 		}
 
 		private void UpdateData()
@@ -226,8 +224,8 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 					//_cmd[5] = (byte)Vr;
 					//_cmd[6] = (byte)((int)(Vr * 10.0) % 10 * 16 + (int)(Vr * 100.0) % 10);
 
-					Debug.WriteLine("WriteVoltage id=" + i.ToString() + " speed=" + Str(targetSpeed) + " V=" + Str(Vr) +
-						" Cmd: " + _cmd[5].ToString("X2") + " " + _cmd[6].ToString("X2"));
+					_log.WriteLine("WriteVoltage id=" + i.ToString() + " speed=" + Str(targetSpeed) + " V=" + Str(Vr) +
+						" (" + _cmd[5].ToString("X2") + " " + _cmd[6].ToString("X2") + ")");
 
 					bool ok = WriteCmd(7, 1);
 					speed = (ok ? targetSpeed : 0);
@@ -263,7 +261,7 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 				Thread.Sleep(_portPoll);
 				if (Environment.TickCount - t0 > _portCmdTimeout)
 				{
-					Debug.WriteLine("WriteCmd: TIMEOUT!");
+					_log.WriteLine("WriteCmd timeout");
 					FlushPort();
 					break;
 				}
@@ -272,7 +270,7 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 			int count = _port.BytesToRead;
 			if (count != responseSize)
 			{
-				Debug.WriteLine("WriteCmd: invalid BytesToRead=" + count.ToString());
+				_log.WriteLine("WriteCmd invalid BytesToRead=" + count.ToString());
 				FlushPort();
 				return false;
 			}
@@ -289,25 +287,28 @@ namespace OpenHardwareMonitor.Hardware.Nzxt
 		{
 			if (_port != null) throw new InvalidOperationException("Port already opened");
 
+			_log.WriteLine("OpenPort " + _portName);
+
 			_port = new SerialPort(_portName, _portSpeed);
 			_port.Open();
 
 			FlushPort();
 		}
 
-		private void FlushPort()
-		{
-			_port.DiscardInBuffer();
-			_port.DiscardOutBuffer();
-		}
-
 		private void ClosePort()
 		{
 			if (_port != null)
 			{
+				_log.WriteLine("ClosePort " + _port.PortName);
 				_port.Dispose();
 				_port = null;
 			}
+		}
+
+		private void FlushPort()
+		{
+			_port.DiscardInBuffer();
+			_port.DiscardOutBuffer();
 		}
 
 		public struct DeviceInfo
