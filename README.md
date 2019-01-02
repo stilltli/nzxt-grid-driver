@@ -1,4 +1,4 @@
-# NZXT Grid+ Driver
+# Grid+ Driver
 
 Uses Open Hardware Monitor
 
